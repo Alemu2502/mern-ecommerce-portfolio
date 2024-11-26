@@ -1,0 +1,89 @@
+.card {
+    margin-bottom: 20px;
+  }
+  
+  .card-header {
+    font-weight: bold;
+    font-size: 1.25em;
+  }
+  
+  .card-body {
+    padding: 20px;
+  }
+  
+  .card-p {
+    margin: 10px 0;
+  }
+  
+  .black-10 {
+    color: black;
+    font-size: 1.1em;
+  }
+  
+  .black-9 {
+    color: #555;
+    margin-bottom: 5px;
+  }
+  
+  .black-8 {
+    color: #777;
+    margin-bottom: 10px;
+  }
+  
+  .stock-status-container {
+    margin-top: 10px;
+  }
+  
+  .stock-status {
+    display: inline-block;
+  }
+  
+  .star-rating-container {
+    margin: 10px 0;
+  }
+  
+  /* Media Queries for Responsiveness */
+  @media (max-width: 768px) {
+    .card-header {
+      font-size: 1.1em;
+    }
+    
+    .card-body {
+      padding: 15px;
+    }
+  
+    .black-10 {
+      font-size: 1em;
+    }
+  
+    .stock-status-container {
+      margin-top: 5px;
+    }
+  
+    .star-rating-container {
+      margin: 5px 0;
+    }
+  }
+  
+  @media (max-width: 576px) {
+    .card-header {
+      font-size: 1em;
+    }
+    
+    .card-body {
+      padding: 10px;
+    }
+  
+    .black-10 {
+      font-size: 0.9em;
+    }
+  
+    .stock-status-container {
+      margin-top: 5px;
+    }
+  
+    .star-rating-container {
+      margin: 5px 0;
+    }
+  }
+  

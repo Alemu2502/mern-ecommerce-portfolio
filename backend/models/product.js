@@ -2,7 +2,6 @@ import mongoose from 'mongoose';
 
 const { ObjectId } = mongoose.Schema;
 
-// Schema for products
 const productSchema = new mongoose.Schema(
     {
         name: {
@@ -19,8 +18,7 @@ const productSchema = new mongoose.Schema(
         price: {
             type: Number,
             trim: true,
-            required: true,
-            maxlength: 32
+            required: true
         },
         category: {
             type: ObjectId,
@@ -41,10 +39,16 @@ const productSchema = new mongoose.Schema(
         shipping: {
             required: false,
             type: Boolean
-        }
+        },
+        author: {  // Added author field
+            type: String,
+            trim: true,
+            required: true,
+            maxlength: 32
+        },
+        reviews: [{ type: ObjectId, ref: 'Review' }] // Adding reviews field
     },
     { timestamps: true }
 );
 
-// Exporting the Product model
 export default mongoose.model('Product', productSchema);

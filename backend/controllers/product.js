@@ -3,29 +3,67 @@ import _ from 'lodash';
 import fs from 'fs';
 import Product from '../models/product.js';
 import { errorHandler } from '../helpers/dbErrorHandler.js';
+import Review from '../models/review.js';
 
-// Middleware to find product by ID
-// Middleware to find product by ID
-export const productById = async (req, res, next, id) => {
-    console.log(`Fetching product with id: ${id}`);  // Logging line
+export const addOrUpdateReview = async (req, res) => {
+    console.log('Request received at addOrUpdateReview');
     try {
-        const product = await Product.findById(id).populate('category').exec();
-        if (!product) {
-            console.log(`Product not found: ${id}`);  // Logging line
-            return res.status(400).json({
-                error: 'Product not found'
+        const { rating, comment } = req.body;
+        const { productId } = req.params;
+        const userId = req.auth._id;
+
+        console.log(`User ID: ${userId}, Product ID: ${productId}`);
+
+        const existingReview = await Review.findOne({ product: productId, user: userId });
+
+        if (existingReview) {
+            existingReview.rating = rating;
+            existingReview.comment = comment;
+            await existingReview.save();
+            return res.json(existingReview);
+        } else {
+            const review = new Review({
+                user: userId,
+                product: productId,
+                rating,
+                comment
             });
+            await review.save();
+
+            const product = await Product.findById(productId);
+            if (!product) {
+                console.error('Product not found');
+                return res.status(400).json({ error: 'Product not found' });
+            }
+            product.reviews.push(review._id);
+            await product.save();
+
+            return res.status(201).json(review);
         }
-        req.product = product;
-        next();
-    } catch (err) {
-        console.log(`Error finding product: ${err}`);  // Logging line
-        return res.status(400).json({
-            error: errorHandler(err)
-        });
+    } catch (error) {
+        console.error('Error adding or updating review:', error);
+        return res.status(400).json({ error: errorHandler(error) });
     }
 };
 
+// Middleware to find product by ID
+
+export const productById = async (req, res, next, id) => {
+  try {
+    const product = await Product.findById(id).exec();
+    if (!product) {
+      return res.status(400).json({
+        error: 'Product not found'
+      });
+    }
+    req.product = product; // Adds product object in req with product info
+    next();
+  } catch (err) {
+    return res.status(400).json({
+      error: 'Product not found'
+    });
+  }
+};
 
 // Controller to read a single product
 export const read = (req, res) => {
@@ -44,9 +82,9 @@ export const create = (req, res) => {
             });
         }
 
-        // Check for all required fields
-        const { name, description, price, category, quantity, shipping } = fields;
-        if (!name || !description || !price || !category || !quantity || !shipping) {
+        // Check for all required fields, including author
+        const { name, description, price, category, quantity, shipping, author } = fields;
+        if (!name || !description || !price || !category || !quantity || !shipping || !author) {
             return res.status(400).json({
                 error: 'All fields are required'
             });
@@ -62,8 +100,8 @@ export const create = (req, res) => {
                 });
             }
             try {
-                product.photo.data = fs.readFileSync(files.photo.filepath); // Use `filepath` instead of `path`
-                product.photo.contentType = files.photo.mimetype; // Use `mimetype` instead of `type`
+                product.photo.data = fs.readFileSync(files.photo.filepath);
+                product.photo.contentType = files.photo.mimetype;
             } catch (readError) {
                 return res.status(400).json({
                     error: 'Error reading file'
@@ -72,7 +110,7 @@ export const create = (req, res) => {
         }
 
         try {
-            const result = await product.save(); // Use async/await instead of callback
+            const result = await product.save();
             res.json(result);
         } catch (saveErr) {
             return res.status(400).json({
@@ -83,23 +121,21 @@ export const create = (req, res) => {
 };
 
 // Controller to delete a product
-// Controller to delete a product
 export const remove = async (req, res) => {
     try {
         const product = req.product;
-        console.log(`Attempting to delete product with id: ${product._id}`);  // Logging line
+        console.log(`Attempting to delete product with id: ${product._id}`);
         await Product.deleteOne({ _id: product._id });
         res.json({
             message: 'Product deleted successfully'
         });
     } catch (err) {
-        console.log(`Error deleting product: ${err}`);  // Logging line
+        console.log(`Error deleting product: ${err}`);
         return res.status(400).json({
             error: errorHandler(err)
         });
     }
 };
-
 
 // Controller to update a product
 export const update = (req, res) => {
@@ -123,8 +159,8 @@ export const update = (req, res) => {
                 });
             }
             try {
-                product.photo.data = fs.readFileSync(files.photo.filepath); // Use `filepath` instead of `path`
-                product.photo.contentType = files.photo.mimetype; // Use `mimetype` instead of `type`
+                product.photo.data = fs.readFileSync(files.photo.filepath);
+                product.photo.contentType = files.photo.mimetype;
             } catch (readError) {
                 return res.status(400).json({
                     error: 'Error reading file'
@@ -133,7 +169,7 @@ export const update = (req, res) => {
         }
 
         try {
-            const result = await product.save(); // Use async/await instead of callback
+            const result = await product.save();
             res.json(result);
         } catch (saveErr) {
             return res.status(400).json({
@@ -143,12 +179,7 @@ export const update = (req, res) => {
     });
 };
 
-/**
- * List products based on query parameters
- * by sell = /products?sortBy=sold&order=desc&limit=4
- * by arrival = /products?sortBy=createdAt&order=desc&limit=4
- * if no params are sent, then all products are returned
- */
+// List products based on query parameters
 export const list = async (req, res) => {
     let order = req.query.order ? req.query.order : 'asc';
     let sortBy = req.query.sortBy ? req.query.sortBy : '_id';
@@ -158,6 +189,10 @@ export const list = async (req, res) => {
         const products = await Product.find()
                                       .select('-photo')
                                       .populate('category')
+                                      .populate({
+                                          path: 'reviews',
+                                          populate: { path: 'user', select: 'name' }
+                                      })
                                       .sort([[sortBy, order]])
                                       .limit(limit)
                                       .exec();
@@ -169,15 +204,12 @@ export const list = async (req, res) => {
     }
 };
 
-/**
- * Find products based on the req product category
- * other products that have the same category will be returned
- */
+// Find products based on the req product category
 export const listRelated = async (req, res) => {
     let limit = req.query.limit ? parseInt(req.query.limit) : 6;
 
     try {
-        const products = await Product.find({ _id: { $ne: req.product }, category: req.product.category })
+        const products = await Product.find({ _id: { $ne: req.product._id }, category: req.product.category })
                                       .limit(limit)
                                       .populate('category', '_id name')
                                       .exec();
@@ -201,12 +233,7 @@ export const listCategories = async (req, res) => {
     }
 };
 
-/**
- * List products by search
- * show categories in checkbox and price range in radio buttons
- * as the user clicks on those checkboxes and radio buttons
- * make api request and show the products to users based on what they want
- */
+// List products by search
 export const listBySearch = async (req, res) => {
     let order = req.body.order ? req.body.order : 'desc';
     let sortBy = req.body.sortBy ? req.body.sortBy : '_id';
@@ -217,8 +244,6 @@ export const listBySearch = async (req, res) => {
     for (let key in req.body.filters) {
         if (req.body.filters[key].length > 0) {
             if (key === 'price') {
-                // gte - greater than price [0-10]
-                // lte - less than
                 findArgs[key] = {
                     $gte: req.body.filters[key][0],
                     $lte: req.body.filters[key][1]
@@ -261,20 +286,29 @@ export const photo = (req, res, next) => {
 export const listSearch = async (req, res) => {
     const query = {};
     if (req.query.search) {
-        query.name = { $regex: req.query.search, $options: 'i' };
-        if (req.query.category && req.query.category !== 'All') {
-            query.category = req.query.category;
-        }
-        try {
-            const products = await Product.find(query).select('-photo').exec();
-            res.json(products);
-        } catch (err) {
-            return res.status(400).json({
-                error: errorHandler(err)
-            });
-        }
+        const searchRegex = { $regex: req.query.search, $options: 'i' };
+        query.$or = [
+            { name: searchRegex },
+            { author: searchRegex }
+        ];
+    }
+    if (req.query.category && req.query.category !== 'All') {
+        query.category = req.query.category;
+    }
+
+    console.log('Search query:', query); // Log the query to debug issues
+
+    try {
+        const products = await Product.find(query).select('-photo').exec();
+        res.json(products);
+    } catch (err) {
+        console.error('Error fetching products:', err);
+        return res.status(400).json({
+            error: 'Products not found'
+        });
     }
 };
+
 
 // Middleware to decrease product quantity after a successful order
 export const decreaseQuantity = async (req, res, next) => {

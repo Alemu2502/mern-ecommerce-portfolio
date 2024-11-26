@@ -1,63 +1,77 @@
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import User from '../models/user.js';
-import {expressjwt} from 'express-jwt';
+import { expressjwt } from 'express-jwt';
 import { errorHandler } from '../helpers/dbErrorHandler.js';
-import braintree from 'braintree';
+import { sendEmail, transporter } from './mailer.js';
+import crypto from 'crypto';
+
 
 dotenv.config();
 
 const accessTokenSecret = process.env.JWT_SECRET;
 const refreshTokenSecret = process.env.REFRESH_TOKEN_SECRET;
-let refreshTokens = []; // In a real application, save these in a database
+const emailVerificationSecret = process.env.EMAIL_VERIFICATION_SECRET;
+let refreshTokens = [];
 
-const gateway = new braintree.BraintreeGateway({
-    environment: braintree.Environment.Sandbox,
-    merchantId: process.env.BRAINTREE_MERCHANT_ID,
-    publicKey: process.env.BRAINTREE_PUBLIC_KEY,
-    privateKey: process.env.BRAINTREE_PRIVATE_KEY
-});
-
-// Function to check if the user is authenticated
-export const isAuthenticated = () => {
-    if (typeof window == 'undefined') {
-        return false;
-    }
-
-    if (localStorage.getItem('jwt')) {
-        return JSON.parse(localStorage.getItem('jwt'));
-    } else {
-        return false;
-    }
-};
-
-// Generate access token
 export const generateAccessToken = (user) => {
     return jwt.sign(user, accessTokenSecret, { expiresIn: '15m' });
 };
 
-// Generate refresh token
 export const generateRefreshToken = (user) => {
     const refreshToken = jwt.sign(user, refreshTokenSecret, { expiresIn: '7d' });
     refreshTokens.push(refreshToken);
     return refreshToken;
 };
 
-// Sign up a new user
+// Sign up a new user with email verification
 export const signup = async (req, res) => {
+    const { name, email, password } = req.body;
+
+    // Validate input fields
+    if (!name || !email || !password) {
+        return res.status(400).json({ error: 'All fields are required' });
+    }
+
+    // Validate password length
+    if (password.length < 8) {
+        return res.status(400).json({ error: 'Password must be at least 8 characters long' });
+    }
+
     try {
-        const user = new User(req.body);
+        const existsEmail = await User.findOne({ email });
+        if (existsEmail) {
+            return res.status(422).json({ error: 'Email already exists. Please sign in.' });
+        }
+
+        const verificationToken = jwt.sign({ email }, process.env.EMAIL_VERIFICATION_SECRET, { expiresIn: '24h' });
+
+        const user = new User({ name, email, password, verificationToken });
         await user.save();
-        user.salt = undefined;
-        user.hashed_password = undefined;
-        res.json({ user });
+
+        const verificationUrl = `${process.env.CLIENT_URL}/verify-email/${verificationToken}`;
+
+        const emailHtml = `
+            <h2>Please verify your email</h2>
+            <p>Click <a href="${verificationUrl}">here</a> to verify your email. This link will expire in 24 hours.</p>
+        `;
+
+        await transporter.sendMail({
+            to: email,
+            from:`"Alemu Molla" <${process.env.EMAIL_FROM}>`, // Ensure this is correctly set
+            subject: 'Email Verification',
+            html: emailHtml
+        });
+
+        res.status(201).json({ message: 'Verification email sent. Please check your inbox.' });
     } catch (err) {
         console.error(err);
-        res.status(400).json({ error: errorHandler(err) || 'Email is taken' });
+        res.status(400).json({ error: 'Error registering user. Please try again.' });
     }
 };
 
 // Sign in an existing user
+
 export const signin = async (req, res) => {
     const { email, password } = req.body;
     try {
@@ -65,6 +79,10 @@ export const signin = async (req, res) => {
 
         if (!user) {
             return res.status(400).json({ error: 'User with that email does not exist. Please signup' });
+        }
+
+        if (!user.isVerified) {
+            return res.status(401).json({ error: 'Please verify your email to sign in.' });
         }
 
         if (!user.authenticate(password)) {
@@ -77,7 +95,6 @@ export const signin = async (req, res) => {
         res.cookie('t', token, { expire: new Date() + 3600000, httpOnly: true, secure: process.env.NODE_ENV === 'production' });
         res.cookie('refreshToken', refreshToken, { expire: new Date() + 604800000, httpOnly: true, secure: process.env.NODE_ENV === 'production' });
 
-        // Store the token in localStorage
         if (typeof window !== 'undefined') {
             localStorage.setItem('jwt', JSON.stringify({ token, refreshToken }));
         }
@@ -87,7 +104,7 @@ export const signin = async (req, res) => {
 
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: errorHandler(err) || 'Internal server error' });
+        res.status(500).json({ error: 'Internal server error' });
     }
 };
 
@@ -98,17 +115,21 @@ export const signout = (req, res) => {
     res.json({ message: 'Signout success' });
 };
 
-// Middleware to require sign in
+// Middleware to require signin
 export const requireSignin = expressjwt({
-    secret: accessTokenSecret,
-    algorithms: ['HS256'],
+    secret: process.env.JWT_SECRET,
+    algorithms: ['HS256'], // Specify the algorithm used
     userProperty: 'auth'
 });
 
-// Middleware to check if the user is authenticated
 export const isAuth = (req, res, next) => {
-    let user = req.profile && req.auth && req.profile._id == req.auth._id;
+    console.log('Auth Middleware: Checking if user is authenticated...');
+    console.log('Request auth:', req.auth);
+    console.log('Request profile:', req.profile);
+
+    let user = req.profile && req.auth && req.profile._id.toString() === req.auth._id.toString();
     if (!user) {
+        console.log('Authorization failed: User not authenticated or authorized.');
         return res.status(403).json({
             error: 'Access denied'
         });
@@ -116,10 +137,11 @@ export const isAuth = (req, res, next) => {
     next();
 };
 
-// Middleware to check if the user is an admin
 export const isAdmin = (req, res, next) => {
     if (req.profile.role === 0) {
-        return res.status(403).json({ error: 'Admin resource! Access denied' });
+        return res.status(403).json({
+            error: 'Admin resource! Access denied'
+        });
     }
     next();
 };
@@ -177,3 +199,82 @@ export const refreshAccessToken = async (req, res) => {
         res.json({ accessToken: newAccessToken });
     });
 };
+
+
+// Forgot Password - Request Reset Token
+export const forgotPassword = async (req, res) => {
+    const { email } = req.body;
+
+    try {
+        const user = await User.findOne({ email });
+
+        if (!user) {
+            return res.status(400).json({ error: 'User with that email does not exist.' });
+        }
+
+        if (!user.isVerified) {
+            return res.status(401).json({ error: 'Please verify your email to request a password reset.' });
+        }
+
+        const token = crypto.randomBytes(20).toString('hex');
+        console.log('Generated reset token:', token); // Debug statement
+
+        user.resetPasswordToken = token;
+        user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
+
+        await user.save();
+        console.log('User after saving:', user); // Debug statement
+
+        const resetUrl = `${process.env.CLIENT_URL}/reset-password/${token}`;
+
+        const emailHtml = `
+            <h2>Password Reset Request</h2>
+            <p>Click <a href="${resetUrl}">here</a> to reset your password. This link will expire in 1 hour.</p>
+        `;
+
+        await sendEmail(user.email, 'Password Reset', emailHtml);
+        res.json({ message: 'Password reset email sent. Please check your inbox.' });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Error sending password reset email.' });
+    }
+};
+
+
+// Reset Password
+
+export const resetPassword = async (req, res) => {
+    const { token, newPassword } = req.body;
+
+    try {
+        const user = await User.findOne({
+            resetPasswordToken: token,
+            resetPasswordExpires: { $gt: Date.now() }
+        });
+
+        console.log('Received token:', token); // Debug statement
+        console.log('Found user:', user); // Debug statement
+
+        if (!user) {
+            return res.status(400).json({ error: 'Invalid or expired token.' });
+        }
+
+        // Update password and clear the reset token fields
+        user.password = newPassword;
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpires = undefined;
+
+        const updatedUser = await user.save();
+        console.log('Updated user:', updatedUser); // Debug statement
+
+        res.json({ message: 'Password has been reset successfully.' });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Error resetting password.' });
+    }
+};
+
+
+

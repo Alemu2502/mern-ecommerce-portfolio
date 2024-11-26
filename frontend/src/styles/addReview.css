@@ -1,0 +1,16 @@
+.star-rating {
+    display: flex;
+    align-items: center;
+}
+
+.filled-star {
+    color: gold;
+}
+
+.empty-star {
+    color: lightgray;
+}
+
+.star-rating span {
+    cursor: pointer; /* This makes the stars clickable */
+}

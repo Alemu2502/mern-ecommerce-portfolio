@@ -1,14 +1,21 @@
 import { Order, CartItem } from '../models/order.js';
 import { errorHandler } from '../helpers/dbErrorHandler.js';
-// sendgrid for email npm i @sendgrid/mail
-import sgMail from '@sendgrid/mail';
+import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
 
 // Load environment variables from .env file for security
 dotenv.config();
 
-// Configure SendGrid API key using an environment variable
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+// Create a transporter object using the default SMTP transport
+const transporter = nodemailer.createTransport({
+    host: process.env.EMAIL_HOST,
+    port: process.env.EMAIL_PORT,
+    secure: false, // true for 465, false for other ports
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    }
+});
 
 // Middleware to find an order by ID
 export const orderById = async (req, res, next, id) => {
@@ -18,7 +25,7 @@ export const orderById = async (req, res, next, id) => {
                                   .exec();
         if (!order) {
             return res.status(400).json({
-                error: errorHandler(err) || 'Order does not exist'
+                error: 'Order does not exist'
             });
         }
         req.order = order;
@@ -40,9 +47,9 @@ export const create = async (req, res) => {
         
         // Prepare email data to send to the admin
         const emailData = {
+            from: `"Your Company" <${process.env.EMAIL_USER}>`, // Sender address
             to: process.env.ADMIN_EMAIL, // Admin's email from environment variables
-            from: process.env.SENDGRID_VERIFIED_SENDER, // Verified sender email from environment variables
-            subject: `A new order is received`,
+            subject: `A new order is received`, // Subject line
             html: `
                 <p>Customer name: ${req.profile.name}</p>
                 <p>Total products: ${order.products.length}</p>
@@ -51,9 +58,10 @@ export const create = async (req, res) => {
             `
         };
 
-        await sgMail.send(emailData);
+        await transporter.sendMail(emailData);
         res.json(data);
     } catch (error) {
+        console.error('Error sending email:', error);
         return res.status(400).json({
             error: errorHandler(error)
         });

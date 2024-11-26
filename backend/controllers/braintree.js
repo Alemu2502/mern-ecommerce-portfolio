@@ -4,6 +4,7 @@ import { expressjwt } from 'express-jwt';
 import { errorHandler } from '../helpers/dbErrorHandler.js';
 import braintree from 'braintree';
 import dotenv from 'dotenv';
+import { sendEmail } from './mailer.js';
 
 dotenv.config(); // Load environment variables
 
@@ -22,7 +23,19 @@ export const signup = async (req, res) => {
         await user.save();
         user.salt = undefined;
         user.hashed_password = undefined;
-        res.json({ user });
+
+        // Create email verification token
+        const emailToken = jwt.sign({ _id: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+        const verificationUrl = `${process.env.CLIENT_URL}/email-verification/${emailToken}`;
+
+        // Send verification email
+        const emailHtml = `
+            <p>Please verify your email by clicking the link below:</p>
+            <a href="${verificationUrl}">Verify Email</a>
+        `;
+        await sendEmail(user.email, 'Email Verification', emailHtml);
+
+        res.json({ message: 'Signup successful! Please check your email for verification instructions.' });
     } catch (err) {
         console.error(err);
         res.status(400).json({ error: errorHandler(err) || 'Email is taken' });

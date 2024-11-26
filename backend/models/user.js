@@ -18,7 +18,7 @@ const userSchema = new mongoose.Schema(
         },
         hashed_password: {
             type: String,
-            required: true
+            //required: true
         },
         about: {
             type: String,
@@ -32,7 +32,22 @@ const userSchema = new mongoose.Schema(
         history: {
             type: Array,
             default: []
-        }
+        },
+        isVerified: {
+            type: Boolean,
+            default: false // Default to false, user needs to verify email
+        },
+        verificationToken: {
+            type: String // Field to store the verification token
+        },
+        resetPasswordToken: {
+            type: String,
+            default: ''
+        },
+        resetPasswordExpires: {
+            type: Date,
+            default: Date.now()
+        },
     },
     { timestamps: true }
 );

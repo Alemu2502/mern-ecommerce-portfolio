@@ -1,0 +1,9 @@
+.star-rating {
+    display: flex;
+    align-items: center;
+  }
+  
+  .star {
+    transition: color 0.2s;
+  }
+  

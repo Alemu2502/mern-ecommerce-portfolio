@@ -2,20 +2,36 @@ import Category from '../models/category.js';
 import Product from '../models/product.js';
 import { errorHandler } from '../helpers/dbErrorHandler.js';
 
-// Middleware to find category by ID
 export const categoryById = async (req, res, next, id) => {
     try {
-        const category = await Category.findById(id).exec();
+        const category = await Category.findById(id);
         if (!category) {
             return res.status(400).json({
-                error: 'Category does not exist'
+                error: 'Category not found'
             });
         }
         req.category = category;
         next();
-    } catch (err) {
+    } catch (error) {
         return res.status(400).json({
-            error: errorHandler(err)
+            error: 'Error finding category'
+        });
+    }
+};
+
+export const userById = async (req, res, next, id) => {
+    try {
+        const user = await User.findById(id);
+        if (!user) {
+            return res.status(400).json({
+                error: 'User not found'
+            });
+        }
+        req.profile = user;
+        next();
+    } catch (error) {
+        return res.status(400).json({
+            error: 'Error finding user'
         });
     }
 };
@@ -56,23 +72,23 @@ export const update = async (req, res) => {
 };
 
 // Remove a category
+
 export const remove = async (req, res) => {
-    const category = req.category;
     try {
-        const products = await Product.find({ category }).exec();
-        if (products.length >= 1) {
+        const category = req.category;
+        if (!category) {
             return res.status(400).json({
-                message: `Sorry. You can't delete ${category.name}. It has ${products.length} associated products.`
-            });
-        } else {
-            const data = await category.remove();
-            res.json({
-                message: 'Category deleted'
+                error: 'Category not found'
             });
         }
+
+        await category.deleteOne();
+        res.json({
+            message: 'Category deleted successfully'
+        });
     } catch (err) {
         return res.status(400).json({
-            error: errorHandler(err)
+            error: 'Failed to delete category'
         });
     }
 };
